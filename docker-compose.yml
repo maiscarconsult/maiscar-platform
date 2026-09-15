@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: platform
+      POSTGRES_DB: platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ./packages/backend
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "4000:4000"
+    command: sh -c "npx prisma migrate deploy && node dist/server.js"
+
+  # Runs continuously, consuming the recurring queues (metrics-sync every 6h,
+  # daily ideation at 06:00, publishing tick every 15min). This is the
+  # process that gives the platform its "keeps running by itself" behavior —
+  # it does not depend on any chat session or manual trigger.
+  worker:
+    build:
+      context: ./packages/backend
+      dockerfile: Dockerfile.worker
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    command: sh -c "node dist/jobs/scheduler.js && node dist/jobs/worker.js"
+
+  frontend:
+    build:
+      context: ./packages/frontend
+    env_file:
+      - .env
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

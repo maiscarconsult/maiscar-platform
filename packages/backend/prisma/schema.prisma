@@ -1,0 +1,564 @@
+// ============================================================================
+// Content Intelligence Platform — Prisma Schema (PostgreSQL + pgvector)
+// ============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// ---------------------------------------------------------------------------
+// AUTH / MULTI-TENANCY
+// ---------------------------------------------------------------------------
+
+enum Role {
+  OWNER
+  ADMIN
+  EDITOR
+  ANALYST
+  VIEWER
+}
+
+model User {
+  id             String         @id @default(uuid())
+  email          String         @unique
+  passwordHash   String
+  name           String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  memberships    Membership[]
+  promptVersions PromptVersion[] @relation("PromptAuthor")
+  auditLogs      AuditLog[]
+}
+
+model Organization {
+  id            String         @id @default(uuid())
+  name          String
+  slug          String         @unique
+  // Autonomy level per section 36: 1=recommends only ... 5=fully autonomous
+  // within user-set limits. Enforced by jobs/publishing.ts and the
+  // publishing routes below — never bypassed by the worker.
+  autonomyLevel Int            @default(1)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  memberships   Membership[]
+  brands        Brand[]
+  apiKeys       ApiKey[]
+  auditLogs     AuditLog[]
+  generationJobs GenerationJob[]
+  publishingJobs PublishingJob[]
+}
+
+model Membership {
+  id             String       @id @default(uuid())
+  userId         String
+  organizationId String
+  role           Role         @default(EDITOR)
+  createdAt      DateTime     @default(now())
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+}
+
+// Encrypted at rest at the application layer (see lib/crypto.ts) — never store plaintext.
+model ApiKey {
+  id             String       @id @default(uuid())
+  organizationId String
+  provider       String       // e.g. "meta_ads", "shopify", "openai"
+  encryptedValue String
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, provider])
+}
+
+model AuditLog {
+  id             String        @id @default(uuid())
+  organizationId String?
+  userId         String?
+  action         String
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  user           User?         @relation(fields: [userId], references: [id])
+}
+
+// ---------------------------------------------------------------------------
+// BRAND / PRODUCT / AUDIENCE
+// ---------------------------------------------------------------------------
+
+model Brand {
+  id             String       @id @default(uuid())
+  organizationId String
+  name           String
+  positioning    String?
+  tone           String?
+  colors         Json?        // ["#111827", ...]
+  visualIdentity Json?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  products       Product[]
+  competitors    Competitor[]
+  audiences      Audience[]
+  socialAccounts SocialAccount[]
+  campaigns      Campaign[]
+  content        Content[]
+  contentPillars ContentPillar[]
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  brandId     String
+  name        String
+  benefits    Json?
+  features    Json?
+  price       Decimal? @db.Decimal(12, 2)
+  offers      Json?
+  proofs      Json?
+  guarantees  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  brand       Brand      @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  campaigns   Campaign[]
+  sales       Sale[]
+}
+
+model Audience {
+  id          String   @id @default(uuid())
+  brandId     String
+  persona     String
+  pains       Json?
+  desires     Json?
+  objections  Json?
+  language    String?
+  awareness   String?  // unaware, problem-aware, solution-aware, product-aware, most-aware
+  createdAt   DateTime @default(now())
+
+  brand       Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+}
+
+model ContentPillar {
+  id        String   @id @default(uuid())
+  brandId   String
+  name      String
+  description String?
+  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  contents  Content[]
+}
+
+// ---------------------------------------------------------------------------
+// COMPETITORS
+// ---------------------------------------------------------------------------
+
+model Competitor {
+  id           String   @id @default(uuid())
+  brandId      String
+  name         String
+  profileUrl   String?
+  platform     String?
+  niche        String?
+  keywords     Json?
+  hashtags     Json?
+  dataSource   String   // "official_api" | "user_provided" | "manual"
+  createdAt    DateTime @default(now())
+
+  brand            Brand              @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  competitorContent CompetitorContent[]
+}
+
+model CompetitorContent {
+  id                 String   @id @default(uuid())
+  competitorId       String
+  platform           String
+  contentType        String
+  publishedAt        DateTime?
+  views              Int?
+  likes              Int?
+  comments           Int?
+  shares             Int?
+  saves              Int?
+  engagementRate     Float?
+  hook               String?
+  topic              String?
+  format             String?
+  durationSeconds    Int?
+  cta                String?
+  sentiment          String?
+  visualStyle        String?
+  transcript         String?
+  keywords           Json?
+  performanceScore   Float?
+  source             String   // where this data came from (official API name, user upload, ...)
+  confidence         Float    @default(1.0) // 1.0 = observed, <1.0 = estimated
+  externalId         String?  // platform-native post id, when the source is an official API — used to dedupe repeat syncs
+  createdAt          DateTime @default(now())
+
+  competitor         Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+  analyses            ContentAnalysis[]
+
+  @@index([competitorId, externalId])
+}
+
+model ContentAnalysis {
+  id                    String   @id @default(uuid())
+  competitorContentId   String?
+  contentId             String?
+  hookPattern           String?
+  structurePattern       Json?    // {hook, problem, agitation, solution, proof, benefit, cta}
+  visualPattern          Json?
+  copyPattern             Json?
+  psychologicalTriggers  Json?
+  extractedPattern       String?  // abstracted pattern, never verbatim copy
+  createdByModel         String?
+  createdAt               DateTime @default(now())
+
+  competitorContent CompetitorContent? @relation(fields: [competitorContentId], references: [id], onDelete: Cascade)
+  content           Content?           @relation(fields: [contentId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// CONTENT (owned by the brand)
+// ---------------------------------------------------------------------------
+
+enum ContentStatus {
+  IDEA
+  DRAFT
+  GENERATED
+  REVIEW
+  APPROVED
+  SCHEDULED
+  PUBLISHED
+  ANALYZING
+  OPTIMIZED
+  ARCHIVED
+}
+
+enum ContentType {
+  PHOTO
+  VIDEO
+  CAROUSEL
+  REEL
+  STORY
+  AD
+  POST
+  THREAD
+  EMAIL
+}
+
+model Content {
+  id             String        @id @default(uuid())
+  brandId        String
+  campaignId     String?
+  pillarId       String?
+  title          String?
+  type           ContentType
+  status         ContentStatus @default(IDEA)
+  hook           String?
+  topic          String?
+  format         String?
+  cta            String?
+  angle          String?
+  targetAudience String?
+  productId      String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  brand        Brand              @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  campaign     Campaign?          @relation(fields: [campaignId], references: [id])
+  pillar       ContentPillar?     @relation(fields: [pillarId], references: [id])
+  versions     ContentVersion[]
+  assets       ContentAsset[]
+  performance  ContentPerformance[]
+  analyses     ContentAnalysis[]
+  experiments  Experiment[]
+  generatedFrom GeneratedContent[]
+  conversions  Conversion[]
+}
+
+model ContentVersion {
+  id         String   @id @default(uuid())
+  contentId  String
+  versionNum Int
+  copy       String?
+  script     String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  content    Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+}
+
+model ContentAsset {
+  id         String   @id @default(uuid())
+  contentId  String
+  type       String   // image, video, audio, subtitle
+  url        String   // object storage URL
+  provider   String?  // which AI provider generated it (nullable = uploaded by user)
+  createdAt  DateTime @default(now())
+
+  content    Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+}
+
+model ContentPerformance {
+  id               String   @id @default(uuid())
+  contentId        String
+  platform         String
+  views            Int?
+  reach            Int?
+  likes            Int?
+  comments         Int?
+  shares           Int?
+  saves            Int?
+  clicks           Int?
+  leads            Int?
+  sales            Int?
+  revenue          Decimal? @db.Decimal(14, 2)
+  engagementRate   Float?
+  retentionRate    Float?
+  measuredAt       DateTime @default(now())
+  source           String   // "meta_api" | "manual" | "estimated"
+  confidence       Float    @default(1.0)
+
+  content          Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@index([contentId, measuredAt])
+}
+
+model GeneratedContent {
+  id            String   @id @default(uuid())
+  contentId     String
+  promptVersionId String?
+  modelUsed     String
+  input         Json
+  output        Json
+  createdAt     DateTime @default(now())
+
+  content        Content        @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  promptVersion  PromptVersion? @relation(fields: [promptVersionId], references: [id])
+}
+
+// ---------------------------------------------------------------------------
+// SOCIAL / CAMPAIGNS / OFFERS
+// ---------------------------------------------------------------------------
+
+model SocialAccount {
+  id           String   @id @default(uuid())
+  brandId      String
+  platform     String
+  handle       String
+  accessTokenRef String? // reference to ApiKey, never raw token here
+  connectedAt  DateTime @default(now())
+
+  brand        Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  publishingJobs PublishingJob[]
+  audienceSnapshots AudienceSnapshot[]
+}
+
+// Real, observed audience numbers for an account the org itself owns/admins
+// (never for third-party/competitor accounts — the Graph API has no
+// endpoint that exposes another account's audience data, by design, for
+// privacy reasons). One row per sync run — see jobs/metricsSync.ts.
+model AudienceSnapshot {
+  id              String   @id @default(uuid())
+  socialAccountId String
+  followers       Int?
+  reach           Int?
+  impressions     Int?
+  profileViews    Int?
+  engagedUsers    Int?
+  measuredAt      DateTime @default(now())
+  source          String   // "meta_api"
+  confidence      Float    @default(1.0)
+
+  socialAccount   SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+
+  @@index([socialAccountId, measuredAt])
+}
+
+model Campaign {
+  id          String     @id @default(uuid())
+  brandId     String
+  productId   String?
+  name        String
+  objective   String?
+  status      String     @default("draft")
+  createdAt   DateTime   @default(now())
+
+  brand       Brand      @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  product     Product?   @relation(fields: [productId], references: [id])
+  content     Content[]
+  offers      Offer[]
+}
+
+model Offer {
+  id          String   @id @default(uuid())
+  campaignId  String
+  description String
+  price       Decimal? @db.Decimal(12, 2)
+  createdAt   DateTime @default(now())
+
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// SALES / ATTRIBUTION
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id         String   @id @default(uuid())
+  externalId String?  // id in Shopify/Hotmart/etc
+  email      String?
+  createdAt  DateTime @default(now())
+  sales      Sale[]
+}
+
+model Sale {
+  id           String   @id @default(uuid())
+  productId    String
+  customerId   String?
+  amount       Decimal  @db.Decimal(14, 2)
+  currency     String   @default("BRL")
+  source       String   // "shopify" | "hotmart" | "stripe" | "manual" ...
+  externalId   String?
+  occurredAt   DateTime
+  createdAt    DateTime @default(now())
+
+  product      Product   @relation(fields: [productId], references: [id])
+  customer     Customer? @relation(fields: [customerId], references: [id])
+  conversions  Conversion[]
+}
+
+model Conversion {
+  id           String   @id @default(uuid())
+  contentId    String?
+  saleId       String?
+  type         String   // "click" | "lead" | "purchase"
+  attributionModel String @default("last_touch") // first_touch | last_touch | multi_touch
+  confidence   Float    @default(0.5)
+  occurredAt   DateTime @default(now())
+
+  content      Content? @relation(fields: [contentId], references: [id])
+  sale         Sale?    @relation(fields: [saleId], references: [id])
+}
+
+// ---------------------------------------------------------------------------
+// EXPERIMENTS
+// ---------------------------------------------------------------------------
+
+model Experiment {
+  id           String   @id @default(uuid())
+  contentId    String?
+  hypothesis   String
+  controlDesc  String
+  variantDesc  String
+  metric       String   // ctr, retention, engagement, leads, sales, revenue
+  controlValue Float?
+  variantValue Float?
+  winner       String?  // "control" | "variant" | "inconclusive"
+  status       String   @default("running")
+  createdAt    DateTime @default(now())
+  concludedAt  DateTime?
+
+  content      Content? @relation(fields: [contentId], references: [id])
+}
+
+// ---------------------------------------------------------------------------
+// AI ORCHESTRATION / PROMPTS
+// ---------------------------------------------------------------------------
+
+model AIModel {
+  id          String   @id @default(uuid())
+  provider    String   // "openai" | "anthropic" | "stability" | "mock" ...
+  name        String
+  capability  String   // text | image | video | embedding | vision | speech
+  costPerUnit Float?
+  avgLatencyMs Int?
+  active      Boolean  @default(true)
+}
+
+model Prompt {
+  id          String   @id @default(uuid())
+  key         String   @unique // e.g. "hook_generator"
+  description String?
+  createdAt   DateTime @default(now())
+
+  versions    PromptVersion[]
+}
+
+model PromptVersion {
+  id          String   @id @default(uuid())
+  promptId    String
+  version     Int
+  template    String
+  authorId    String?
+  isActive    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  prompt      Prompt   @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  author      User?    @relation("PromptAuthor", fields: [authorId], references: [id])
+  generations GeneratedContent[]
+  generationJobs GenerationJob[]
+
+  @@unique([promptId, version])
+}
+
+model GenerationJob {
+  id             String   @id @default(uuid())
+  organizationId String
+  promptVersionId String?
+  requestId      String   @unique @default(uuid())
+  modelUsed      String?
+  status         String   @default("queued") // queued | running | completed | failed
+  input          Json
+  output         Json?
+  latencyMs      Int?
+  costUsd        Float?
+  errorMessage   String?
+  createdAt      DateTime @default(now())
+  completedAt    DateTime?
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  promptVersion  PromptVersion?  @relation(fields: [promptVersionId], references: [id])
+}
+
+model PublishingJob {
+  id              String   @id @default(uuid())
+  organizationId  String
+  socialAccountId String?
+  contentId       String?
+  status          String   @default("queued") // queued | scheduled | publishing | published | failed
+  scheduledFor    DateTime?
+  approvalMode    String   @default("HUMAN_APPROVAL") // AUTOMATIC | HUMAN_APPROVAL
+  approvedAt      DateTime?
+  publishedAt     DateTime?
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+
+  organization    Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  socialAccount   SocialAccount? @relation(fields: [socialAccountId], references: [id])
+}
+
+// ---------------------------------------------------------------------------
+// RAG / KNOWLEDGE BASE (pgvector)
+// ---------------------------------------------------------------------------
+
+model KnowledgeDocument {
+  id          String                @id @default(uuid())
+  brandId     String?
+  sourceType  String                // "content" | "transcript" | "competitor" | "brand_doc" | "comment"
+  sourceId    String?
+  text        String
+  embedding   Unsupported("vector(1536)")?
+  createdAt   DateTime              @default(now())
+
+  @@index([brandId])
+}

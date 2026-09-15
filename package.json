@@ -1,0 +1,13 @@
+{
+  "name": "content-intelligence-platform",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:backend": "npm run dev -w @platform/backend",
+    "dev:frontend": "npm run dev -w @platform/frontend",
+    "build": "npm run build -w @platform/backend && npm run build -w @platform/frontend",
+    "test": "npm run test -w @platform/backend"
+  }
+}

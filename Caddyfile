@@ -1,0 +1,28 @@
+# MAIS CAR — Caddyfile (cloud, 2026-09-15).
+# Automatic Let's Encrypt when CADDY_DOMAIN is a real hostname; falls
+# back to plain HTTP on port 80 when set to ":80".
+#
+# Only /health and /webhook are exposed publicly. Everything else on the
+# API (topic radar, cover render, etc.) is a private-only endpoint.
+
+{$CADDY_DOMAIN} {
+    log {
+        output stdout
+        format json
+    }
+
+    # Public health endpoint for uptime pings / cloud health checks.
+    handle /health {
+        reverse_proxy backend:4000
+    }
+
+    # Meta webhook (only if you register the app for webhooks — not required
+    # for Content Publishing API, but leaving the route wired).
+    handle /webhook/meta {
+        reverse_proxy backend:4000
+    }
+
+    # Everything else: 404 by default so the render/publish surface is not
+    # exposed to the internet at all.
+    respond 404
+}

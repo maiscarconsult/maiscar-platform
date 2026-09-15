@@ -1,0 +1,32 @@
+{
+  "_comment": "MAIS CAR — Cloudflare R2 lifecycle rules (2026-09-15). Apply via `wrangler r2 bucket lifecycle put maiscar-media --file r2-lifecycle.json` OR the Cloudflare dashboard (R2 → maiscar-media → Settings → Object lifecycle rules). Every rule is scoped to a key prefix so a mistake in one bucket doesn't wipe another. Keep 'Standard' storage class (no Infrequent Access — R2 Standard is already cheapest for the write-once/read-a-few pattern of a published Reel).",
+  "rules": [
+    {
+      "id": "reels-media-30d",
+      "enabled": true,
+      "conditions": { "prefix": "reels/" },
+      "deleteObjectsTransition": {
+        "condition": { "type": "Age", "maxAge": 2592000 }
+      },
+      "_comment": "Published Reels' MP4 + cover live 30 days on R2. Meta's own CDN owns the copy that viewers actually see; R2 only exists as the ingest URL. 30 days is enough for reprocessing / audits."
+    },
+    {
+      "id": "temp-render-1d",
+      "enabled": true,
+      "conditions": { "prefix": "temp/" },
+      "deleteObjectsTransition": {
+        "condition": { "type": "Age", "maxAge": 86400 }
+      },
+      "_comment": "Pre-publish render artifacts (draft MP4s, intermediate clips) wiped after 24h. Anything worth keeping was moved to reels/<id>/ before that."
+    },
+    {
+      "id": "aborted-multipart-1d",
+      "enabled": true,
+      "conditions": { "prefix": "" },
+      "abortMultipartUploadsTransition": {
+        "condition": { "type": "Age", "maxAge": 86400 }
+      },
+      "_comment": "A render that crashed mid-upload leaves an incomplete multipart. Kill after 24h so R2 storage doesn't accumulate ghost parts."
+    }
+  ]
+}

@@ -1,0 +1,115 @@
+# MAIS CAR — production docker-compose (cloud VPS, 2026-09-15).
+# One-machine deployment. Postgres runs in-cluster on a persistent volume
+# to avoid a managed-DB monthly fee at the smallest scale; migrate to
+# Neon/RDS later if the Reel volume outgrows a single 4GB VPS. Redis
+# stays only because BullMQ needs it — a light instance is enough.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-maiscar}
+      POSTGRES_USER: ${POSTGRES_USER:-maiscar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: America/Recife
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-maiscar}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: ["redis-server", "--save", "60", "1", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/${GITHUB_OWNER}/maiscar-backend:${IMAGE_TAG:-latest}
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-maiscar}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-maiscar}?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      NODE_ENV: production
+      PORT: "4000"
+      TZ: America/Recife
+      # BullMQ worker uses this to claim a single-runner lock per Reel job.
+      JOB_LOCK_TTL_MS: "3600000"
+    volumes:
+      - generated_data:/app/packages/backend/generated
+      - cache_data:/app/packages/backend/.cache
+    ports:
+      - "127.0.0.1:4000:4000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/health', r => process.exit(r.statusCode===200?0:1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  # Same image, different command — the scheduler drives 09:00/19:00 Reel
+  # jobs + hourly Insights sync. Kept as a separate container so a crash
+  # in the render worker doesn't kill the API and vice versa.
+  scheduler:
+    image: ghcr.io/${GITHUB_OWNER}/maiscar-backend:${IMAGE_TAG:-latest}
+    restart: always
+    depends_on:
+      backend:
+        condition: service_healthy
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-maiscar}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-maiscar}?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      NODE_ENV: production
+      TZ: America/Recife
+      SCHEDULER_ENABLED: "false"  # flipped to true only after 1 cloud publish passes end-to-end
+    volumes:
+      - generated_data:/app/packages/backend/generated
+      - cache_data:/app/packages/backend/.cache
+    command: ["node", "packages/backend/dist/scheduler.js"]
+
+  # Caddy — free automatic Let's Encrypt TLS for the public endpoint the
+  # Meta Graph API will fetch mp4s from (until R2 is wired). Also gives
+  # us a single reverse-proxy for /webhook and /health.
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  postgres_data: {}
+  redis_data: {}
+  generated_data: {}
+  cache_data: {}
+  caddy_data: {}
+  caddy_config: {}

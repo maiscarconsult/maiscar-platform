@@ -1,0 +1,45 @@
+# MAIS CAR — .dockerignore (2026-09-15).
+# Ships only source + package manifests to the build context — cuts image
+# size and prevents the build from picking up local render output.
+
+.git
+.github
+node_modules
+**/node_modules
+**/dist
+**/build
+
+# Generated media never belongs in the image — R2 owns it in prod, the
+# named volume in docker-compose.cloud.yml handles ephemeral render output.
+generated
+**/generated
+packages/backend/generated
+packages/backend/.cache
+
+# Local dev artifacts
+*.log
+*.pid
+*.seed
+.env
+.env.local
+.env.development
+.env.test
+# Never bake production secrets into the image:
+.env.production
+Caddyfile
+**/*.sqlite
+**/*.sqlite-journal
+
+# Windows/OneDrive metadata
+Thumbs.db
+desktop.ini
+*.lnk
+RUN-REEL-NOW*.bat
+RUN-REEL-NOW*.log
+.launcher-ready
+
+# Repo docs are handy in the image but not required to run the pipeline.
+docs/**/*.png
+docs/**/*.jpg
+Downloads
+content-review

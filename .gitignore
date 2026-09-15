@@ -1,0 +1,125 @@
+# MAIS CAR — .gitignore (2026-09-15 cloud migration rev-1).
+# Kept intentionally broad. Anything even close to a secret, a build
+# artifact, a rendered Reel, or a local cache does NOT belong in Git.
+
+# ============ SECRETS ============
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+.env.*.local
+.env.*.production
+.env.*.override
+*.env
+!.env.example
+!.env.production.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.der
+*_rsa
+*_ed25519
+id_rsa*
+id_ed25519*
+*.token
+*.secret
+credentials.json
+service-account*.json
+.autopublish-token
+packages/backend/.cache/autopublish.flag.json
+packages/backend/certs/
+.launcher-ready
+
+# ============ DEPENDENCIES ============
+node_modules/
+**/node_modules/
+.npm/
+.yarn/
+.pnp/
+.pnp.*
+
+# ============ BUILD ARTIFACTS ============
+dist/
+build/
+.next/
+.remotion/
+out/
+coverage/
+*.tsbuildinfo
+.turbo/
+
+# ============ RENDERED MEDIA — never in Git ============
+generated/
+packages/backend/generated/
+packages/backend/remotion/public/runs/
+packages/backend/remotion/public/generated/
+packages/backend/.cache/
+packages/backend/.cache/sfx/
+packages/backend/.cache/sourced-photos/
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+*.mp3
+*.wav
+*.ogg
+!packages/backend/assets/**
+!content-review/**/*.png
+!docs/**/*.png
+
+# ============ DATABASE ============
+*.sqlite
+*.sqlite-journal
+*.db
+*.db-journal
+*.dump
+postgres_data/
+redis_data/
+pgdata/
+
+# ============ LOGS ============
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+RUN-REEL-NOW-launch.log
+packages/backend/.cache/run-reel-now-*.log
+packages/backend/.cache/reel-run-*.log
+packages/backend/.cache/pipeline-log.jsonl
+packages/backend/.cache/ai-telemetry.jsonl
+packages/backend/.cache/insights-first-snapshot.log
+
+# ============ EDITOR / OS METADATA ============
+.DS_Store
+Thumbs.db
+desktop.ini
+*.lnk
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+.aider*
+
+# ============ WINDOWS / ONEDRIVE ============
+"Claude outputs"/
+Claude outputs/
+
+# ============ NESTED DUPLICATE (accidental) ============
+content-intelligence-platform/
+
+# ============ MISC ============
+.tmp/
+tmp/
+.cache-loader/
+.parcel-cache/
+*.pid
+*.seed
+.wrangler/
