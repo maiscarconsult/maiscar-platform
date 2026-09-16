@@ -1,5 +1,12 @@
 # MAISCAR_CREATIVE_TRUTH.md
 
+
+> **Operational governance:** every session, job, deploy, or resume on this
+> project runs under `docs/MAISCAR_AUTONOMOUS_OPERATING_POLICY.md`. Read it first.
+> `USER_OPERATOR_MODE=FALSE`, `COWORK_ORCHESTRATOR_MODE=TRUE`,
+> `AUTONOMOUS_EXECUTION=TRUE`. This creative truth doc supplies the WHAT;
+> the operating policy supplies the HOW.
+
 Single source of creative truth for MAIS CAR Reels. Written 2026-09-15 after
 comparing the account owner's reference video (`~/Downloads/ScreenRecording_09-10-2026 22-24-55_1.mp4`,
 65.8s / 60fps / 1290×2796 screen recording of a real published Reel) against
