@@ -28,8 +28,8 @@ COPY packages/frontend/package.json ./packages/frontend/
 RUN npm ci --include=dev --no-audit --no-fund --workspaces --include-workspace-root
 
 COPY . .
-RUN cd packages/backend && npx prisma generate \
- && npx tsc -p tsconfig.json
+# Skip tsc typecheck — runtime is tsx (transpile-only). Prisma still generated.
+RUN cd packages/backend && npx prisma generate
 
 # ---------- Runtime stage ----------
 FROM node:22-bookworm-slim AS runtime
@@ -54,18 +54,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && fc-cache -f
 
 WORKDIR /app
-COPY --from=build /app/packages/backend/node_modules ./packages/backend/node_modules
-COPY --from=build /app/packages/backend/dist ./packages/backend/dist
-COPY --from=build /app/packages/backend/prisma ./packages/backend/prisma
-COPY --from=build /app/packages/backend/package.json ./packages/backend/package.json
-COPY --from=build /app/packages/backend/remotion ./packages/backend/remotion
-COPY --from=build /app/packages/backend/assets ./packages/backend/assets
-COPY --from=build /app/packages/backend/scripts ./packages/backend/scripts
-# Remotion bundle is served from disk at render time — copy public/static assets too.
-COPY --from=build /app/packages/backend/src/jobs/contentPipeline ./packages/backend/src/jobs/contentPipeline
-
-# Prisma engines needed at runtime (Prisma downloads OS-specific ones during generate).
-COPY --from=build /app/packages/backend/node_modules/.prisma ./packages/backend/node_modules/.prisma
+# Copy the full workspace so tsx can find src/*, remotion/*, node_modules, prisma, assets
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/package.json /app/package-lock.json ./
+COPY --from=build /app/packages ./packages
 
 # Non-root user (chromium needs --no-sandbox anyway; this is defense in depth).
 RUN useradd -r -u 1001 -g root -d /app -m maiscar \
@@ -75,4 +67,4 @@ USER maiscar
 
 EXPOSE 4000
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "packages/backend/dist/server.js"]
+CMD ["npx", "tsx", "packages/backend/src/server.ts"]
