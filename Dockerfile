@@ -19,9 +19,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY packages/backend/package.json packages/backend/package-lock.json* ./packages/backend/
-COPY package.json ./
-RUN cd packages/backend && npm ci --include=dev --no-audit --no-fund
+# Copy manifests first for docker layer cache
+COPY package.json package-lock.json ./
+COPY packages/backend/package.json ./packages/backend/
+COPY packages/frontend/package.json ./packages/frontend/
+# Install the workspace (backend + frontend) — root package-lock.json.
+# --include=dev because build needs typescript/tsx/prisma; --workspaces installs all
+RUN npm ci --include=dev --no-audit --no-fund --workspaces --include-workspace-root
 
 COPY . .
 RUN cd packages/backend && npx prisma generate \
