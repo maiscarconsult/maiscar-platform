@@ -68,9 +68,6 @@ RUN useradd -r -u 1001 -g root -d /app -m maiscar \
  && chown -R maiscar:root /app
 USER maiscar
 
-# Persistent scratch for rendered MP4s / covers / TTS / SFX before they
-# get pushed to R2. Mounted from a docker volume in docker-compose.cloud.yml.
-VOLUME ["/app/packages/backend/generated", "/app/packages/backend/.cache"]
 
 EXPOSE 4000
 ENTRYPOINT ["/usr/bin/tini", "--"]
