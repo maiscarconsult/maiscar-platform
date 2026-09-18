@@ -67,4 +67,4 @@ USER maiscar
 
 EXPOSE 4000
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["npx", "tsx", "packages/backend/src/server.ts"]
+CMD ["sh", "-c", "cd packages/backend && npx prisma migrate deploy && cd /app && exec npx tsx packages/backend/src/server.ts"]
